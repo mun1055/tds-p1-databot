@@ -7,10 +7,10 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-LOG_URL = os.getenv("LOG_URL", "https://your-host/run.jsonl")
+LOG_URL = os.getenv("LOG_URL")
 
 client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
-LOG_FILE = "/tmp/run.jsonl"
+LOG_FILE = "run.jsonl"
 
 conversation_history = {}
 
