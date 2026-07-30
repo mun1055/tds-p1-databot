@@ -1,16 +1,4 @@
-"""Data-analyst Telegram bot — TDS Project 1.
-
-An LLM agent that answers data-analysis questions sent over Telegram.
-Replies to every message with exactly one JSON object:
-    {"answer": <shaped as the question asks>, "log_url": "<public JSONL log>"}
-
-Architecture:
-  - FastAPI app serves /health and /run.jsonl (the public agent log).
-  - A background thread long-polls Telegram getUpdates.
-  - Each incoming message runs an agentic loop (OpenAI-compatible chat with a
-    run_python tool) until the model produces the final JSON answer.
-  - A keep-warm thread pings our own public URL so the free host never idles out.
-"""
+"""Data-analyst Telegram bot — Background Worker version."""
 
 import io
 import json
@@ -24,25 +12,21 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, PlainTextResponse
 
 # ---------------------------------------------------------------- config
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-AIPIPE_TOKEN = os.environ.get("AIPIPE_TOKEN", "")
-MODEL = os.environ.get("MODEL", "gpt-4o-mini")
+BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
+AIPIPE_TOKEN   = os.environ.get("AIPIPE_TOKEN", "")
+MODEL          = os.environ.get("MODEL", "gpt-4o-mini")
 MODEL_BASE_URL = os.environ.get("MODEL_BASE_URL", "https://aipipe.org/openai/v1")
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
-LOG_PATH = os.environ.get("LOG_PATH", "/tmp/run.jsonl")
-LOG_URL = f"{BASE_URL}/run.jsonl"
-TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+LOG_PATH       = os.environ.get("LOG_PATH", "/tmp/run.jsonl")
+TG_API         = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 MAX_AGENT_STEPS = 10
-PY_TIMEOUT = 60  # seconds for one run_python call
-ANSWER_BUDGET = 210  # wall-clock seconds before we force a final answer
+PY_TIMEOUT      = 60
+ANSWER_BUDGET   = 210
 
-_log_lock = threading.Lock()
-_histories: dict[int, list[dict]] = {}  # chat_id -> chat-completion messages
+_log_lock  = threading.Lock()
+_histories: dict[int, list[dict]] = {}
 _hist_lock = threading.Lock()
 
 
@@ -57,7 +41,6 @@ def log_event(**fields):
 
 # ---------------------------------------------------------------- tools
 def run_python(code: str) -> str:
-    """Execute Python code, return captured stdout (or the error)."""
     out = io.StringIO()
     result: dict = {}
 
@@ -133,14 +116,11 @@ def chat_completion(messages, use_tools=True):
 
 
 def extract_json(text: str):
-    """Pull the first balanced JSON object out of model text."""
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.M)
     start = text.find("{")
     if start == -1:
         return None
-    depth = 0
-    in_str = False
-    esc = False
+    depth, in_str, esc = 0, False, False
     for i in range(start, len(text)):
         c = text[i]
         if esc:
@@ -160,34 +140,34 @@ def extract_json(text: str):
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start : i + 1])
+                    return json.loads(text[start: i + 1])
                 except json.JSONDecodeError:
                     return None
     return None
 
 
 def solve(chat_id: int, question: str) -> str:
-    """Run the agent loop; return the final JSON reply text."""
+    # ✅ No LOG_URL from BASE_URL — use a static placeholder
+    log_url = os.environ.get("LOG_URL", "N/A")
+
     with _hist_lock:
         history = _histories.setdefault(chat_id, [])
         history.append({"role": "user", "content": question})
-        # keep the last 20 turns
         del history[:-20]
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history)
 
     log_event(event="question", chat_id=chat_id, text=question)
 
     final_text = None
-    deadline = time.time() + ANSWER_BUDGET
+    deadline   = time.time() + ANSWER_BUDGET
+
     for step in range(MAX_AGENT_STEPS):
         out_of_time = time.time() > deadline
         if out_of_time:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Time is up. Reply NOW with only your best final JSON object.",
-                }
-            )
+            messages.append({
+                "role": "user",
+                "content": "Time is up. Reply NOW with only your best final JSON object.",
+            })
         try:
             msg = chat_completion(messages, use_tools=not out_of_time)
         except Exception as e:
@@ -198,6 +178,7 @@ def solve(chat_id: int, question: str) -> str:
             except Exception as e2:
                 log_event(event="llm_error_final", chat_id=chat_id, error=str(e2))
                 break
+
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             messages.append(msg)
@@ -209,10 +190,13 @@ def solve(chat_id: int, question: str) -> str:
                 log_event(event="tool_call", chat_id=chat_id, step=step, code=code[:4000])
                 output = run_python(code)
                 log_event(event="tool_result", chat_id=chat_id, step=step, output=output[:4000])
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc["id"], "content": output}
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": output
+                })
             continue
+
         final_text = msg.get("content") or ""
         break
 
@@ -221,7 +205,7 @@ def solve(chat_id: int, question: str) -> str:
         obj = {"answer": (final_text or "unable to determine").strip()[:1000]}
     if "answer" not in obj:
         obj = {"answer": obj}
-    obj["log_url"] = LOG_URL
+    obj["log_url"] = log_url
     reply = json.dumps(obj, ensure_ascii=False)
 
     with _hist_lock:
@@ -240,7 +224,7 @@ def handle_update(upd):
     msg = upd.get("message") or upd.get("edited_message")
     if not msg:
         return
-    text = msg.get("text") or msg.get("caption") or ""
+    text    = msg.get("text") or msg.get("caption") or ""
     chat_id = msg["chat"]["id"]
     if not text:
         return
@@ -248,14 +232,18 @@ def handle_update(upd):
         reply = solve(chat_id, text)
     except Exception:
         log_event(event="agent_crash", chat_id=chat_id, error=traceback.format_exc())
-        reply = json.dumps({"answer": "internal error", "log_url": LOG_URL})
+        reply = json.dumps({"answer": "internal error", "log_url": "N/A"})
     tg("sendMessage", chat_id=chat_id, text=reply)
 
 
-def poll_loop():
-    log_event(event="startup", base_url=BASE_URL, model=MODEL)
-    offset = 0
+# ---------------------------------------------------------------- main
+if __name__ == "__main__":
+    log_event(event="startup", model=MODEL)
+    print("Bot starting in polling mode...")
+
     pool = ThreadPoolExecutor(max_workers=6)
+    offset = 0
+
     while True:
         try:
             resp = requests.get(
@@ -269,42 +257,3 @@ def poll_loop():
         except Exception as e:
             log_event(event="poll_error", error=str(e))
             time.sleep(5)
-
-
-def keepwarm_loop():
-    """Ping our own public URL so a free host never spins down."""
-    while True:
-        time.sleep(600)
-        try:
-            requests.get(f"{BASE_URL}/health", timeout=30)
-        except Exception:
-            pass
-
-
-# ---------------------------------------------------------------- web app
-app = FastAPI()
-
-
-@app.on_event("startup")
-def _start():
-    if not os.path.exists(LOG_PATH):
-        log_event(event="log_created")
-    threading.Thread(target=poll_loop, daemon=True).start()
-    threading.Thread(target=keepwarm_loop, daemon=True).start()
-
-
-@app.api_route("/health", methods=["GET", "HEAD"])
-def health():
-    return {"ok": True, "model": MODEL, "log_url": LOG_URL}
-
-
-@app.get("/run.jsonl")
-def run_log():
-    if os.path.exists(LOG_PATH):
-        return FileResponse(LOG_PATH, media_type="application/jsonl; charset=utf-8", filename="run.jsonl")
-    return PlainTextResponse("", media_type="application/jsonl")
-
-
-@app.get("/")
-def root():
-    return {"service": "data-analyst-telegram-bot", "log_url": LOG_URL}
