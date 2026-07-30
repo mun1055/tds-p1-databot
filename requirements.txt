@@ -1,7 +1,7 @@
-requests
+python-telegram-bot>=21.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
 pandas
 numpy
 beautifulsoup4
-lxml
-openpyxl
-python-dotenv
