@@ -29,14 +29,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history.append({"role": "user", "content": user_text})
 
     system_prompt = (
-        "You are a careful data analyst. The user's LAST message asks a data-analysis "
-        "question and tells you exactly what JSON shape to reply with. Work out the "
-        "real answer. Reply with ONLY that exact JSON object and absolutely nothing else."
+    "You are a smart and clever data analyst, that can provide accurate answers."
+    "Answer the user's question accurately. "
+    "Respond with a valid JSON object only. "
+    "If the user specifies a JSON schema, follow it exactly. "
+    "Otherwise choose a simple JSON structure that best answers the question."
     )
 
     response = client.chat.completions.create(
         model="gpt-5-mini",
-        messages=[{"role": "system", "content": system_prompt}] + history[-6:],
+        messages=[
+    {"role":"system","content":system_prompt},
+    {"role":"user","content":user_text} 
+        ]
     )
 
     reply_text = (response.choices[0].message.content or "").strip()
