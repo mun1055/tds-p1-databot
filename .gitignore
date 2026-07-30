@@ -1,4 +1,14 @@
+# Environment variables 
 .env
-test_run.jsonl
+*.env
+
+# Log files
+*.jsonl
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.py[cod]
+
 
