@@ -1,8 +1,7 @@
-fastapi
-uvicorn
 requests
 pandas
 numpy
 beautifulsoup4
 lxml
 openpyxl
+python-dotenv
