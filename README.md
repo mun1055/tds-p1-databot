@@ -37,5 +37,4 @@ pip install -r requirements.txt
 export BOT_TOKEN=...        # from @BotFather
 export AIPIPE_TOKEN=...     # OpenAI-compatible API token
 export BASE_URL=https://your-host   # public URL of this service
-uvicorn bot:app --host 0.0.0.0 --port 8000
 ```
