@@ -12,7 +12,7 @@ LOG_URL            = os.getenv("LOG_URL", "N/A")  # see Step 5 — where run.jso
 # -------------------------------------------
 
 client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
-LOG_FILE = "run.jsonl"
+LOG_FILE = "/tmp/run.jsonl"
 
 # Keeps the last few messages per chat, so multi-turn questions work —
 # "answer the LAST message" still needs the earlier ones for context.
